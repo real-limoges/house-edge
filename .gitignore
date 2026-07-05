@@ -1,0 +1,18 @@
+docs/
+
+# Rust / Cargo
+/target
+
+# Build output: the wasm binary and the generated, self-contained deliverable.
+# index.html is produced by build.sh from src/index.template.html and is never
+# hand-edited, so it stays out of version control.
+/index.html
+*.wasm
+
+# Keep Cargo.lock tracked: this repo ships a binary artifact (the wasm module),
+# so a committed lockfile gives reproducible builds. Do NOT ignore it.
+
+# macOS
+.DS_Store
+
+CLAUDE.md
