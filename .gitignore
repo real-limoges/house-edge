@@ -1,7 +1,13 @@
+# Rendered HTML build guides: local reference only, not part of the deliverable.
 docs/
 
-# Rust / Cargo
-/target
+# Rust / Cargo build artifacts. No leading slash: this must match engine/target/
+# as well as any root-level target/, otherwise cargo's debug output gets swept in.
+target/
+*.rs.bk
+
+# Emacs flycheck scratch files (cargo also drops a target/flycheck0/, covered above).
+flycheck_*.rs
 
 # Build output: the wasm binary and the generated, self-contained deliverable.
 # index.html is produced by build.sh from src/index.template.html and is never
@@ -12,7 +18,19 @@ docs/
 # Keep Cargo.lock tracked: this repo ships a binary artifact (the wasm module),
 # so a committed lockfile gives reproducible builds. Do NOT ignore it.
 
+# Local scratch notes.
+.remember/
+
 # macOS
 .DS_Store
+._*
+.Spotlight-V100
+.Trashes
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*~
 
 CLAUDE.md

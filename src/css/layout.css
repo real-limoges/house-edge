@@ -1,0 +1,26 @@
+/* layout.css — layout rhythm (HANDOFF §6.5): narrow centered prose (~700px)
+   for narration, breaking full-bleed for each chapter's ledger + fan chart. */
+
+.masthead { max-width: 700px; margin: 18vh auto 20vh; padding: 0 1rem; }
+.masthead h1 { font-size: 3rem; letter-spacing: -0.02em; margin: 0 0 0.5rem; }
+.lede { color: var(--sage); font-size: 1.25rem; }
+
+.chapter {
+  min-height: 100vh;
+  max-width: 700px;      /* prose column; ledger spread breaks full-bleed within */
+  margin: 0 auto;
+  padding: 12vh 1rem;
+  border-top: 1px solid rgba(184, 146, 74, 0.25); /* brass hairline */
+}
+
+/* pocket rail — fixed strip; pockets sized/colored by edge, wired in rail.js */
+#pocket-rail {
+  position: fixed;
+  top: 50%;
+  right: 1rem;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  z-index: 10;
+}

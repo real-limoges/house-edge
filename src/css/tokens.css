@@ -1,0 +1,36 @@
+/* tokens.css — palette + typography. Hardcoded named tokens (HANDOFF §6.1):
+   the file must work dropped anywhere, so these are real values, not a
+   CSS-variable-only dependency. Two voices: serif prose, tabular-mono numbers. */
+
+:root {
+  /* base */
+  --vault:     #10141A; /* background — cool steel, not green, not black */
+  --ledger:    #171D24; /* panel / surface, one step up */
+  --brass:     #B8924A; /* rule lines, hairlines, ledger ink */
+  --parchment: #EDE7D8; /* primary text — warm ivory */
+  --sage:      #7E8B92; /* secondary / muted text */
+
+  /* per-chapter chip accents */
+  --oxblood: #A8392E; /* roulette — ALSO the "in the red" loss-figure color */
+  --navy:    #2F5C8A; /* blackjack */
+  --violet:  #6F4E91; /* craps */
+  --amber:   #D08A33; /* sports */
+}
+
+html { background: var(--vault); color: var(--parchment); }
+
+body {
+  margin: 0;
+  /* system serif for narration — no webfont load */
+  font-family: Georgia, "Times New Roman", serif;
+  line-height: 1.6;
+}
+
+/* every number is tabular monospace — "prose persuades, numbers don't" */
+.num, .ledger, .stat, [data-num] {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* loss figures render in red ink */
+.loss { color: var(--oxblood); }

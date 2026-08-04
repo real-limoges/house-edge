@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The House Edge</title>
+<!-- Palette + type tokens and layout are hardcoded/inlined (no external CSS,
+     no webfonts) so this file works dropped on any static host or opened from
+     file://. build.sh injects src/css/*.css here. -->
+<style>/* CSS_INJECT */</style>
+</head>
+<body>
+
+<!-- Pocket rail: sized/colored by each chapter's real house edge, not chrome.
+     rail.js wires click -> scrollIntoView and hash deep-linking. -->
+<nav id="pocket-rail" aria-label="Chapters"></nav>
+
+<main>
+  <header class="masthead">
+    <h1>The House Edge</h1>
+    <p class="lede">An actuary's ledger that happens to be auditing a casino.</p>
+  </header>
+
+  <!-- Four chapters, rising in structural complexity. Each: signature
+       mechanism-partial -> fan chart -> three-line ledger close. -->
+  <section class="chapter" id="roulette"  data-edge="5.26" data-accent="oxblood"></section>
+  <section class="chapter" id="blackjack" data-edge="1.40" data-accent="navy"></section>
+  <section class="chapter" id="craps"     data-edge="1.41" data-accent="violet"></section>
+  <section class="chapter" id="sports"    data-edge="4.50" data-accent="amber"></section>
+</main>
+
+<script>/* JS_INJECT */</script>
+</body>
+</html>
