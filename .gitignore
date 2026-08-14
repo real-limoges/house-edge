@@ -1,18 +1,46 @@
+# ---------------------------------------------------------------------------
+# Agent-facing notes. Not shared, so nothing tracked may cite them.
+# ---------------------------------------------------------------------------
 docs/
+CLAUDE.md
 
+# ---------------------------------------------------------------------------
 # Rust / Cargo
-/target
+#
+# Unanchored and trailing-slash: matches engine/target/ and any future crate's
+# target/ directory, not just one at the repo root. A leading slash here would
+# anchor the pattern to the repo root and silently miss engine/target/.
+#
+# Cargo.lock stays TRACKED: this repo ships a binary artifact (the wasm module),
+# so a committed lockfile is what makes the build reproducible. Do NOT ignore it.
+# ---------------------------------------------------------------------------
+target/
+**/*.rs.bk
 
+# ---------------------------------------------------------------------------
 # Build output: the wasm binary and the generated, self-contained deliverable.
 # index.html is produced by build.sh from src/index.template.html and is never
 # hand-edited, so it stays out of version control.
+# ---------------------------------------------------------------------------
 /index.html
 *.wasm
+/dist/
 
-# Keep Cargo.lock tracked: this repo ships a binary artifact (the wasm module),
-# so a committed lockfile gives reproducible builds. Do NOT ignore it.
+# ---------------------------------------------------------------------------
+# Editors and tooling
+# ---------------------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+\#*\#
+.\#*
 
+# ---------------------------------------------------------------------------
 # macOS
+# ---------------------------------------------------------------------------
 .DS_Store
-
-CLAUDE.md
+._*
+.Spotlight-V100
+.Trashes
