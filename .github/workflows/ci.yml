@@ -1,0 +1,67 @@
+# ---------------------------------------------------------------------------
+# Engine CI.
+#
+# One job on purpose. The crate has no dependencies yet, so the wall clock is
+# dominated by toolchain setup and cache restore, not by compilation; splitting
+# fmt/clippy/test across three jobs would pay that fixed cost three times to
+# parallelize a few seconds of work. Split it when the build gets slow enough
+# that the parallelism actually buys something.
+#
+# There is no Cargo.toml at the repo root, so every step runs in engine/.
+# ---------------------------------------------------------------------------
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A force-push supersedes the run it interrupted, so cancel the older one
+# rather than paying for a result nobody will read. Runs on main are keyed
+# per-ref, so they never cancel each other.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  engine:
+    name: engine
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: engine
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # wasm32-unknown-unknown is installed here rather than in a later step so
+      # the toolchain is provisioned in one pass. Cargo.lock is tracked, so
+      # every cargo invocation below passes --locked: CI fails on a stale
+      # lockfile instead of silently resolving a different dependency graph.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: engine
+
+      - name: Format
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --locked
+
+      # The lib is what becomes the wasm module; main.rs is the native harness
+      # and is deliberately not built for wasm. This catches host-only code
+      # (time, threads, filesystem) at the commit that introduces it rather
+      # than at the first real wasm build.
+      - name: Check wasm target
+        run: cargo check --lib --locked --target wasm32-unknown-unknown
