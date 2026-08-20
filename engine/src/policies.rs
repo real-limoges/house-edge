@@ -68,4 +68,23 @@ impl Policy {
         };
         clamp(desired, bankroll, b)
     }
+
+    pub fn update(&mut self, won: bool) {
+        match self {
+            Policy::Flat => {}
+            Policy::Martingale { streak } => {
+                *streak = if won { 0 } else { *streak + 1 };
+            }
+            Policy::Fibonacci { idx } => {
+                *idx = if won { idx.saturating_sub(2) } else { *idx + 1 };
+            }
+            Policy::DAlembert { offset } => {
+                *offset = if won {
+                    offset.saturating_sub(1)
+                } else {
+                    *offset + 1
+                };
+            }
+        }
+    }
 }
