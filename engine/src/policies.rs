@@ -1,3 +1,5 @@
+//! `policies.rs`
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Cap {
     None,     // got the bet it asked for
@@ -52,9 +54,9 @@ fn fib(n: u32) -> f64 {
 
 pub enum Policy {
     Flat,
-    Martingale { streak: u32 }, // consecutive losses
-    Fibonacci { idx: u32 },     // position in sequence
-    DAlembert { offset: u32 },  // units above base
+    Martingale { streak: u32 }, // state: consecutive losses
+    Fibonacci { idx: u32 },     // state: position in sequence
+    DAlembert { offset: u32 },  // state: units above base
 }
 
 impl Policy {
