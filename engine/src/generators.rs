@@ -273,7 +273,10 @@ impl Shoe {
     /// becomes visible, which is not always when it is dealt (the hole card).
     #[inline]
     fn draw_card(&mut self) -> u8 {
-        debug_assert!(self.pos < self.cards.len(), "dealt past the end of the shoe");
+        debug_assert!(
+            self.pos < self.cards.len(),
+            "dealt past the end of the shoe"
+        );
         let c = self.cards[self.pos];
         self.pos += 1;
         c
@@ -330,7 +333,10 @@ impl Shoe {
     /// `docs/reference/rust/03-implementing-the-engine-core.md`.
     pub fn play_hand(&mut self, rng: &mut Rng) -> Outcome {
         self.maybe_reshuffle(rng);
-        debug_assert!(self.rules.max_hands <= 4, "split array assumes max_hands <= 4");
+        debug_assert!(
+            self.rules.max_hands <= 4,
+            "split array assumes max_hands <= 4"
+        );
 
         // Table order: player, dealer up, player, dealer hole.
         let p1 = self.draw_card();
@@ -351,9 +357,15 @@ impl Shoe {
             if dealer_bj {
                 self.count(hole);
                 return if player_bj {
-                    Outcome { net: 0.0, wagered: 1.0 }
+                    Outcome {
+                        net: 0.0,
+                        wagered: 1.0,
+                    }
                 } else {
-                    Outcome { net: -1.0, wagered: 1.0 }
+                    Outcome {
+                        net: -1.0,
+                        wagered: 1.0,
+                    }
                 };
             }
         }
@@ -586,14 +598,14 @@ fn build_locked_h17() -> StrategyTable {
 
     // Player soft total 13..=20, i.e. A,2 through A,9 (index total - 13).
     let soft = [
-        [H, H, H, Dh, Dh, H, H, H, H, H],       // 13 A,2
-        [H, H, H, Dh, Dh, H, H, H, H, H],       // 14 A,3
-        [H, H, Dh, Dh, Dh, H, H, H, H, H],      // 15 A,4
-        [H, H, Dh, Dh, Dh, H, H, H, H, H],      // 16 A,5
-        [H, Dh, Dh, Dh, Dh, H, H, H, H, H],     // 17 A,6
-        [Ds, Ds, Ds, Ds, Ds, S, S, H, H, H],   // 18 A,7
-        [S, S, S, S, Ds, S, S, S, S, S],       // 19 A,8
-        [S, S, S, S, S, S, S, S, S, S],        // 20 A,9
+        [H, H, H, Dh, Dh, H, H, H, H, H],    // 13 A,2
+        [H, H, H, Dh, Dh, H, H, H, H, H],    // 14 A,3
+        [H, H, Dh, Dh, Dh, H, H, H, H, H],   // 15 A,4
+        [H, H, Dh, Dh, Dh, H, H, H, H, H],   // 16 A,5
+        [H, Dh, Dh, Dh, Dh, H, H, H, H, H],  // 17 A,6
+        [Ds, Ds, Ds, Ds, Ds, S, S, H, H, H], // 18 A,7
+        [S, S, S, S, Ds, S, S, S, S, S],     // 19 A,8
+        [S, S, S, S, S, S, S, S, S, S],      // 20 A,9
     ];
 
     // Pairs, indexed by rank: 0 is A,A, 1..=9 are 2,2 through 10,10.
