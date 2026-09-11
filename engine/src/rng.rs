@@ -19,6 +19,7 @@ impl Rng {
         };
         Rng {
             s: [next(), next(), next(), next()],
+            spare: None,
         }
     }
 
@@ -59,6 +60,11 @@ impl Rng {
         (m >> 64) as u64
     }
 
+    #[inline]
+    pub fn uniform(&mut self) -> f64 {
+        (self.next_u64() >> 11) as f64 * (1.0 / (1u64 << 53) as f64)
+    }
+
     /// Standard Box-Muller
     pub fn normal(&mut self) -> f64 {
         if let Some(z) = self.spare.take() {
@@ -69,18 +75,6 @@ impl Rng {
         let theta = std::f64::consts::TAU * u2;
         self.spare = Some(r * theta.sin());
         r * theta.cos()
-    }
-
-    #[inline]
-    pub fn uniform(&mut self) -> f64 {
-        (self.next_u64() >> 11) as f64 * (1.0 / (1u64 << 53) as f64)
-    }
-
-    // standard normal via Box-Muller
-    #[inline]
-    pub fn normal(&mut self) -> f64 {
-        let (u1, u2) = (self.uniform().max(1e-300), self.uniform());
-        (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()
     }
 }
 
