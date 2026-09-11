@@ -540,7 +540,7 @@ fn run_trials_drives_a_blackjack_shoe() {
         k += 1;
         // Each trial's shoe gets its own construction shuffle; the play stream is
         // the per-trial rng `run_trials` owns, so the trials stay independent.
-        let mut rng = Rng::seed(0xC0FF_EE ^ k.wrapping_mul(0x9E37_79B9_7F4A_7C15));
+        let mut rng = Rng::seed(0x00C0_FFEE ^ k.wrapping_mul(0x9E37_79B9_7F4A_7C15));
         let shoe = Shoe::new(BjRules::locked(1.5), locked_h17_strategy(), &mut rng);
         (Round::Single(Generator::Shoe(shoe)), Policy::Flat)
     });

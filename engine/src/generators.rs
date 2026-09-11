@@ -33,7 +33,7 @@ impl Generator {
 
 /// IidTable: Discrete probability net-payout table.
 /// This powers certain games.
-
+///
 /// Arbitrary (not closed form) so weighted virtual reels and 0-inflated
 /// near misses just fall out for free.
 pub struct IidTable {
@@ -254,9 +254,7 @@ impl Shoe {
                     cards.push(rank);
                 }
             }
-            for _ in 0..16 {
-                cards.push(10u8);
-            }
+            cards.extend(std::iter::repeat_n(10u8, 16));
         }
         let mut shoe = Shoe {
             cards,
@@ -353,21 +351,19 @@ impl Shoe {
 
         // The dealer peeks on a ten or an ace. A natural ends the decision with
         // exactly one unit at risk: no split, no double money goes up.
-        if up == 1 || up == 10 {
-            if dealer_bj {
-                self.count(hole);
-                return if player_bj {
-                    Outcome {
-                        net: 0.0,
-                        wagered: 1.0,
-                    }
-                } else {
-                    Outcome {
-                        net: -1.0,
-                        wagered: 1.0,
-                    }
-                };
-            }
+        if (up == 1 || up == 10) && dealer_bj {
+            self.count(hole);
+            return if player_bj {
+                Outcome {
+                    net: 0.0,
+                    wagered: 1.0,
+                }
+            } else {
+                Outcome {
+                    net: -1.0,
+                    wagered: 1.0,
+                }
+            };
         }
         if player_bj {
             // Dealer cannot have a natural here (peeked, or upcard is 2..9).
@@ -392,31 +388,32 @@ impl Shoe {
             // Pair: split if the chart says so and a slot remains.
             let free = (0..4).find(|&j| hands[j].is_none());
             let occupied = hands.iter().filter(|x| x.is_some()).count() as u32;
-            if h.is_pair() && free.is_some() && occupied < self.rules.max_hands {
-                let rank = h.r0;
-                let split_idx = if rank == 1 { 0 } else { (rank - 1) as usize };
-                if self.strategy.split[split_idx][up_col] {
-                    let j = free.unwrap();
-                    let c_i = self.draw_card();
-                    self.count(c_i);
-                    let c_j = self.draw_card();
-                    self.count(c_j);
-                    let mut hi = Hand::two(rank, c_i, 1.0);
-                    let mut hj = Hand::two(rank, c_j, 1.0);
-                    hi.from_split = true;
-                    hj.from_split = true;
-                    // Split aces take one card each and close: no resplit, no
-                    // double, and a resulting 21 is not a natural (handled at
-                    // settlement, since these hands never pay blackjack_pays).
-                    if rank == 1 && self.rules.split_aces_one_card {
-                        hi.split_ace = true;
-                        hi.resolved = true;
-                        hj.split_ace = true;
-                        hj.resolved = true;
+            if h.is_pair() && occupied < self.rules.max_hands {
+                if let Some(j) = free {
+                    let rank = h.r0;
+                    let split_idx = if rank == 1 { 0 } else { (rank - 1) as usize };
+                    if self.strategy.split[split_idx][up_col] {
+                        let c_i = self.draw_card();
+                        self.count(c_i);
+                        let c_j = self.draw_card();
+                        self.count(c_j);
+                        let mut hi = Hand::two(rank, c_i, 1.0);
+                        let mut hj = Hand::two(rank, c_j, 1.0);
+                        hi.from_split = true;
+                        hj.from_split = true;
+                        // Split aces take one card each and close: no resplit, no
+                        // double, and a resulting 21 is not a natural (handled at
+                        // settlement, since these hands never pay blackjack_pays).
+                        if rank == 1 && self.rules.split_aces_one_card {
+                            hi.split_ace = true;
+                            hi.resolved = true;
+                            hj.split_ace = true;
+                            hj.resolved = true;
+                        }
+                        hands[i] = Some(hi);
+                        hands[j] = Some(hj);
+                        continue;
                     }
-                    hands[i] = Some(hi);
-                    hands[j] = Some(hj);
-                    continue;
                 }
             }
 
@@ -627,7 +624,6 @@ fn build_locked_h17() -> StrategyTable {
 }
 
 /// Parlay Stuff (Copula of a bunch of normals)
-
 pub struct Copula {
     /// per-leg thresh on std norm, `probit(p_win)`.
     /// let wins when the draw falls below its threshold
@@ -681,7 +677,7 @@ impl Copula {
 }
 
 /// Baccarat Stuff
-
+///
 /// Banker and player with 8 decks.
 /// Ties push so `net` is 0.0 but `wagered` is 1.0
 /// Banker wins pay 0.95 after 5% commission. This is why the banker's edge

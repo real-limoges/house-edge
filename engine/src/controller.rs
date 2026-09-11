@@ -107,7 +107,6 @@ impl Round {
 /// I made this a closure rather than two values because `Shoe` carries state.
 /// Reusing trials would corelate them through the show.
 /// The trials need to be independent for the p-bands to mean anything.
-
 pub fn run_trials<F>(cfg: &TrialConfig, mut make_trial: F) -> TrialResult
 where
     F: FnMut() -> (Round, Policy),
