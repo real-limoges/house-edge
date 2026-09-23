@@ -1,0 +1,10 @@
+[package]
+name = "house-edge-engine-wasm"
+version = "0.0.1"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+house-edge-engine = { path = "../engine" }
