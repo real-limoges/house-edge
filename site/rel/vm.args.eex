@@ -1,0 +1,4 @@
+## Dirty CPU schedulers act as the concurrency limit.
+## Default is the normal scheduler count and raising past the
+  ## core count buys nothing. CPU-bound and not blocking
++SDcpu 4:4

@@ -14,13 +14,15 @@ defmodule HouseEdgeSite.Application do
       # Start a worker by calling: HouseEdgeSite.Worker.start_link(arg)
       # {HouseEdgeSite.Worker, arg},
       # Start to serve requests, typically the last entry
+      HouseEdgeSite.Figures.Loader,
+      {Task.Supervisor, name: HouseEdgeSite.TaskSupervisor},
       HouseEdgeSiteWeb.Endpoint
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options
-    opts = [strategy: :one_for_one, name: HouseEdgeSite.Supervisor]
-    Supervisor.start_link(children, opts)
+    # opts = [strategy: :one_for_one, name: HouseEdgeSite.Supervisor]
+    Supervisor.start_link(children, strategy: :one_for_one, name: HouseEdgeSite.Supervisor)
   end
 
   # Tell Phoenix to update the endpoint configuration

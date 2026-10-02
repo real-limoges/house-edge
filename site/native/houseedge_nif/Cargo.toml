@@ -1,0 +1,12 @@
+[package]
+name = "houseedge_nif"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "houseedge_nif"
+crate-type = ["cdylib"]
+
+[dependencies]
+rustler = "0.38"
+house-edge-engine = { "../../../engine" }
