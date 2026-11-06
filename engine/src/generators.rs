@@ -20,7 +20,7 @@ pub enum Generator {
 }
 
 impl Generator {
-    /// it's `&mut self` because it gives a uniform signature
+    /// Resolves one decision into a per-unit `Outcome`.
     #[inline]
     pub fn resolve(&mut self, rng: &mut Rng) -> Outcome {
         match self {
@@ -31,19 +31,17 @@ impl Generator {
     }
 }
 
-/// IidTable: Discrete probability net-payout table.
-/// This powers certain games.
-///
-/// Arbitrary (not closed form) so weighted virtual reels and 0-inflated
-/// near misses just fall out for free.
+/// Discrete table of net payouts per unit staked: cumulative probabilities in
+/// `cum` and their payouts in `net`, heaviest outcome first.
 pub struct IidTable {
     pub cum: Vec<f64>,
     pub net: Vec<f64>,
 }
 
 impl IidTable {
-    /// I sort the outcomes by desc prob, which makes the scan in
-    /// `draw` kick out early. Big for slots.
+    /// Builds a table from `(probability, net)` pairs, sorted by descending
+    /// probability. Panics if `outcomes` is empty, a probability is NaN or
+    /// negative, or the probabilities miss 1.0 by 1e-9 or more.
     pub fn new(outcomes: &[(f64, f64)]) -> Self {
         assert!(!outcomes.is_empty(), "empty outcome table");
         let mut v = outcomes.to_vec();
@@ -86,8 +84,7 @@ impl IidTable {
         }
     }
 
-    /// Exact expect net (no sampling, no tolerance)
-    /// These are deterministic so the table tests assert against this
+    /// Exact expected net per unit staked, read off the table with no sampling.
     pub fn expected_net(&self) -> f64 {
         let mut prev = 0.0;
         let mut ev = 0.0;
@@ -98,8 +95,7 @@ impl IidTable {
         ev
     }
 
-    /// Exact per-round standard deviation of net. Tests and minimum-N floors
-    /// read the spread from the table instead of hardcoding it.
+    /// Exact per-round standard deviation of net, read off the table.
     pub fn sd(&self) -> f64 {
         let mean = self.expected_net();
         let mut prev = 0.0;
@@ -139,7 +135,7 @@ pub struct BjRules {
     pub double_after_split: bool,
     pub max_hands: u32,            // All the hands allowed at once + splits
     pub split_aces_one_card: bool, // split aces get one card each and then closed.
-    /// If this is turned on, then we need a new chart, not a different code path
+    /// Never read by `play_hand`: the chart assumes no surrender.
     pub surrender: bool,
     pub blackjack_pays: f64, // Net paid per unit on a natural. (1.5 at 3:2, 1.2 at 6:5)
 }
@@ -168,13 +164,8 @@ pub struct Shoe {
     pub running_count: i32,
 }
 
-/// One player hand inside a decision. Tracked incrementally (no card list) so
-/// the whole `[Option<Hand>; 4]` split tree is `Copy` and allocation-free.
-///
-/// `total` sums ranks with every ace as 1; `aces` lets `best` promote one to 11
-/// when it fits. `resolved` and `busted` are distinct from `Option` presence: a
-/// slot can be occupied and still mid-decision, and a resolved-but-busted hand
-/// does not keep the dealer drawing (point 7) the way a resolved stand does.
+/// One player hand inside a decision, tracked without a card list so the split
+/// tree is `Copy`. `total` counts every ace as 1; `best` promotes one to 11.
 #[derive(Clone, Copy)]
 struct Hand {
     total: u8,
@@ -243,9 +234,8 @@ impl Hand {
 }
 
 impl Shoe {
-    /// Build a fresh shoe for `rules`, shuffled once at construction. The deck
-    /// is `52 * decks` cards: four each of ranks 1..=9 and **sixteen** of rank
-    /// 10 per deck. That sixteen is the whole reason the game is countable.
+    /// A fresh shoe of `52 * decks` cards for `rules`, shuffled once: per deck,
+    /// four each of ranks 1..=9 and **sixteen** of rank 10.
     pub fn new(rules: BjRules, strategy: &'static StrategyTable, rng: &mut Rng) -> Self {
         let mut cards = Vec::with_capacity(52 * rules.decks as usize);
         for _ in 0..rules.decks {
@@ -267,8 +257,7 @@ impl Shoe {
         shoe
     }
 
-    /// Next card off the top. No counting here; the caller counts a card when it
-    /// becomes visible, which is not always when it is dealt (the hole card).
+    /// Next card off the top, uncounted: the caller counts it once it is visible.
     #[inline]
     fn draw_card(&mut self) -> u8 {
         debug_assert!(
@@ -327,8 +316,7 @@ impl Shoe {
     /// One blackjack decision: deal, resolve naturals, play the player's hands
     /// (splits included) against basic strategy, play the dealer, and settle.
     /// Returns a single `Outcome` for the whole tree, `net` in base-bet units
-    /// and `wagered` the sum of every bet placed. See the 10-point contract in
-    /// `docs/reference/rust/03-implementing-the-engine-core.md`.
+    /// and `wagered` the sum of every bet placed.
     pub fn play_hand(&mut self, rng: &mut Rng) -> Outcome {
         self.maybe_reshuffle(rng);
         debug_assert!(
@@ -374,10 +362,7 @@ impl Shoe {
             };
         }
 
-        // Play the player's hands. A split leaves its current slot occupied and
-        // writes the second child into a free slot, so a rescan loop is used
-        // rather than a play cursor. Split always consumes a free slot and every
-        // other action is terminal, which is what makes the loop terminate.
+        // A rescan, not a cursor: a split writes its second hand into a free slot.
         let mut hands: [Option<Hand>; 4] = [None, None, None, None];
         hands[0] = Some(Hand::two(p1, p2, 1.0));
         let up_col = up_index(up);
@@ -401,9 +386,8 @@ impl Shoe {
                         let mut hj = Hand::two(rank, c_j, 1.0);
                         hi.from_split = true;
                         hj.from_split = true;
-                        // Split aces take one card each and close: no resplit, no
-                        // double, and a resulting 21 is not a natural (handled at
-                        // settlement, since these hands never pay blackjack_pays).
+                        // Split aces take one card each and close. A 21 here is not
+                        // a natural: settlement pays it even money.
                         if rank == 1 && self.rules.split_aces_one_card {
                             hi.split_ace = true;
                             hi.resolved = true;
@@ -518,7 +502,7 @@ impl Shoe {
     }
 }
 
-/// Strategy table
+/// One strategy-chart cell.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     Hit,
@@ -531,16 +515,15 @@ pub enum Action {
     DoubleElseStand,
 }
 
-/// I didn't put `split` in here, it is its own bool.
-/// `split` doesn't fall through to hard/soft.
+/// Basic-strategy charts, columns by `up_index`. Splitting is a separate `bool`
+/// plane, not an `Action`; a `false` cell falls through to `hard` or `soft`.
 pub struct StrategyTable {
     /// Player hard total 4..=21. Index `total - 4`
     pub hard: [[Action; 10]; 18],
-    /// Player soft total 13..=20. Index `total - 13`
-    /// Soft 12 is A,A and unreachable. It needs to be split
-    /// or played as a hard 12 if no slot remains.
+    /// Player soft total 13..=20. Index `total - 13`. A,A with no split slot
+    /// left plays as hard 12.
     pub soft: [[Action; 10]; 8],
-    /// Pairs ranked. A,A is `0`. `1..=9` are the other cards
+    /// Pairs by rank: A,A is `0`, and `1..=9` are 2,2 through 10,10.
     pub split: [[bool; 10]; 10],
 }
 
@@ -559,10 +542,6 @@ pub fn up_index(rank: u8) -> usize {
 /// dealer hits soft 17, double any two, double after split, resplit to four,
 /// split aces one card, no surrender. Transcribed from the Wizard of Odds
 /// calculator (columns are dealer 2,3,4,5,6,7,8,9,10,A via `up_index`).
-///
-/// Validated only by the edge it reproduces, not by review: a wrong cell in a
-/// cold part of the chart moves the edge too little to catch by eye. See the
-/// reference tests.
 pub fn locked_h17_strategy() -> &'static StrategyTable {
     static TABLE: OnceLock<StrategyTable> = OnceLock::new();
     TABLE.get_or_init(build_locked_h17)
@@ -623,10 +602,10 @@ fn build_locked_h17() -> StrategyTable {
     StrategyTable { hard, soft, split }
 }
 
-/// Parlay Stuff (Copula of a bunch of normals)
+/// Parlay generator: binary legs sharing one pairwise correlation `rho`
+/// (a single-factor Gaussian copula).
 pub struct Copula {
-    /// per-leg thresh on std norm, `probit(p_win)`.
-    /// let wins when the draw falls below its threshold
+    /// Per-leg `probit(p_win)`; a leg wins when its normal falls below this.
     thresholds: Vec<f64>,
     rho: f64, // correlation
     sqrt_rho: f64,
@@ -635,7 +614,8 @@ pub struct Copula {
 }
 
 impl Copula {
-    /// `legs` are per-leg win probs.
+    /// `legs` are per-leg win probabilities and `payout` is the net paid per
+    /// unit when every leg wins. Panics on no legs or `rho` outside `[0, 1)`.
     pub fn new(legs: &[f64], rho: f64, payout: f64) -> Self {
         assert!(!legs.is_empty(), "parlay with no legs");
         assert!((0.0..1.0).contains(&rho), "rho {rho} is outside [0, 1)");
@@ -648,9 +628,8 @@ impl Copula {
         }
     }
 
-    /// All legs or nothing. The parlay is a single decision staking 1 unit,
-    /// but it has many legs, which is why the bundle collapses to a single
-    /// `Outcome`.
+    /// One parlay decision staking one unit: `payout` if every leg wins,
+    /// otherwise -1.0.
     #[inline]
     pub fn draw_bundle(&self, rng: &mut Rng) -> Outcome {
         let f = rng.normal();
@@ -670,20 +649,14 @@ impl Copula {
         }
     }
 
-    /// Controls how correlated the legs are.
+    /// The pairwise correlation between legs.
     pub fn rho(&self) -> f64 {
         self.rho
     }
 }
 
-/// Baccarat Stuff
-///
-/// Banker and player with 8 decks.
-/// Ties push so `net` is 0.0 but `wagered` is 1.0
-/// Banker wins pay 0.95 after 5% commission. This is why the banker's edge
-/// is lower than its win rate.
-///
-/// This shows that arbitrarily discrete design choices works.
+/// Eight-deck baccarat banker bet. Wins pay 0.95 after the 5% commission, and a
+/// tie pushes (`net` 0.0, `wagered` 1.0).
 pub fn baccarat_banker() -> IidTable {
     IidTable::new(&[(0.458597, 0.95), (0.446247, -1.0), (0.095156, 0.0)])
 }
@@ -692,7 +665,7 @@ pub fn baccarat_player() -> IidTable {
     IidTable::new(&[(0.446247, 1.0), (0.458597, -1.0), (0.095156, 0.0)])
 }
 
-/// Helper functions
+/// Decimal odds, stake included, for American odds.
 pub fn american_to_decimal(odds: f64) -> f64 {
     if odds > 0.0 {
         1.0 + odds / 100.0

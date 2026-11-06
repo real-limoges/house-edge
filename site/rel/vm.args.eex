@@ -1,0 +1,3 @@
+## Dirty CPU schedulers cap concurrent simulations; pinned so the limit lives in
+## the repo, not the host. Cannot exceed the normal scheduler count.
++SDcpu 4:4

@@ -1,12 +1,11 @@
 [workspace]
-# native/houseedge_nif is added here when the NIF crate exists (guide 06);
-# it does not yet, so listing it would fail the workspace resolve.
+# site/native/houseedge_nif joins the members once that crate builds; listing
+# it before then would fail the workspace resolve.
 members = ["engine", "engine-wasm"]
 resolver = "2"
 
-# The NIF must unwind: rustler turns a panic into an Erlang error through
-# catch_unwind, and with panic = "abort" the process aborts and takes the
-# node with it. So `release` unwinds and wasm gets its own profile.
+# `release` must unwind: the NIF relies on catch_unwind, and an abort takes
+# down the BEAM node. So wasm gets its own profile.
 [profile.release]
 opt-level = 3
 lto = true

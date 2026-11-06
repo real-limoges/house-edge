@@ -1,7 +1,6 @@
 //! Reference tests for the engine core.
 //!
-//! The split is the point ([`docs/reference/rust/02-implementing-the-engine-core.md`]):
-//! the table is tested **exactly**, the sampler is tested **statistically**, and
+//! The split is the point: the table is tested **exactly**, the sampler is tested **statistically**, and
 //! never both at once. The exact tests carry the correctness claim; the
 //! statistical ones only prove a sampler is faithful to the table it was handed.
 //!
@@ -18,9 +17,8 @@ use house_edge_engine::policies::{Bounds, Cap, Policy};
 use house_edge_engine::rng::Rng;
 use house_edge_engine::stats::{house_edge, realized_edge};
 
-/// Blackjack house edge PER INITIAL BET (the published convention; the element
-/// of risk on total wager is a different, smaller number) plus its standard
-/// error, over `n` hands of one shoe at the given penetration and payout.
+/// Blackjack house edge per initial bet, and its standard error, over `n` hands
+/// of one shoe at penetration `pen` and natural payout `bj_pays`.
 fn bj_edge(pen: f64, bj_pays: f64, n: u64, seed: u64) -> (f64, f64) {
     let mut rng = Rng::seed(seed);
     let mut rules = BjRules::locked(bj_pays);
@@ -38,9 +36,8 @@ fn bj_edge(pen: f64, bj_pays: f64, n: u64, seed: u64) -> (f64, f64) {
     (-mean, sd / nf.sqrt())
 }
 
-/// Exact: no RNG, no tolerance, microseconds. Catches a wrong paytable, a wrong
-/// pocket count, a transposed probability. This is the test that protects the
-/// site's credibility, and it samples nothing.
+/// Exact: every constructor's `-expected_net()` matches its published edge,
+/// with no sampling.
 #[test]
 fn published_house_edges() {
     // (label, table, published edge as a fraction)
@@ -98,9 +95,8 @@ fn published_house_edges() {
     }
 }
 
-/// The ties-included convention, pinned rather than assumed. Quoted per bet
-/// *decided* (ties excluded) banker is about 1.17%, so which denominator the
-/// tables use has to be a test and not a comment.
+/// Exact: the baccarat tables use the ties-included denominator, whose edge is
+/// smaller than the per-decision one.
 #[test]
 fn baccarat_uses_the_ties_included_denominator() {
     let ties = 0.095156;
@@ -121,9 +117,7 @@ fn baccarat_uses_the_ties_included_denominator() {
     }
 }
 
-/// Exact: the spread the minimum-N arithmetic is derived from
-/// ([`docs/decisions/0013-minimum-n-is-derived.md`]). Same edge on both rows,
-/// 33x the trials, because variance scales with the square of the payout.
+/// Exact: the double-zero tables' `sd()` and the minimum N derived from it.
 #[test]
 fn per_round_spread_matches_the_derivation() {
     let even = roulette_even_money(2);
@@ -146,8 +140,7 @@ fn per_round_spread_matches_the_derivation() {
     assert!((n(straight.sd()) / 2.1e9 - 1.0).abs() < 0.05);
 }
 
-/// Statistical: asserts the sampler is unbiased, with a tolerance derived from
-/// the table's own variance rather than guessed.
+/// Statistical: the sampled mean lands within 4 se of `expected_net()`.
 #[test]
 fn sampler_reproduces_its_table() {
     const N: u32 = 4_000_000;
@@ -168,9 +161,7 @@ fn sampler_reproduces_its_table() {
     );
 }
 
-/// Statistical: a heavy-tailed table needs its own check, because the linear
-/// scan terminating early on the common case is exactly where a sampler bug
-/// would hide. Tolerance again from the table's sd, which is 5.76 here.
+/// Statistical: the same on the heavy-tailed 35:1 straight-up table (sd 5.76).
 #[test]
 fn sampler_reproduces_a_heavy_tailed_table() {
     const N: u32 = 4_000_000;
@@ -191,9 +182,7 @@ fn sampler_reproduces_a_heavy_tailed_table() {
     );
 }
 
-/// Every draw is a resolved bet of exactly one unit, ties included. The ledger's
-/// third line divides by this, so a generator that quietly stopped reporting
-/// wager would show up as a wrong cost per hour and nowhere else.
+/// Every draw is a resolved bet of exactly one unit, ties included.
 #[test]
 fn every_draw_wagers_one_unit() {
     let mut rng = Rng::seed(0xBAC0);
@@ -209,9 +198,8 @@ fn every_draw_wagers_one_unit() {
     }
 }
 
-/// Exact: the reveal ADR 0007 exists to show, asserted rather than assumed. If
-/// someone retunes the defaults so the table max binds first, this fails and
-/// points at the decision record.
+/// Exact: at the locked martingale defaults the bankroll binds before the table
+/// max, and the table max never binds.
 #[test]
 fn bankroll_binds_before_the_table_at_locked_defaults() {
     let bounds = Bounds {
@@ -237,9 +225,8 @@ fn bankroll_binds_before_the_table_at_locked_defaults() {
     assert!(!caps.contains(&Cap::Table));
 }
 
-/// The clamp's ordering is the load-bearing part: when both bounds bite, the one
-/// reported is the one that binds *first* as the bet grows, which is the table
-/// max only when the table max is itself affordable.
+/// Exact: when both bounds bite, the one reported is the one that binds first as
+/// the bet grows.
 #[test]
 fn clamp_reports_the_bound_that_binds_first() {
     let bounds = Bounds {
@@ -264,8 +251,7 @@ fn clamp_reports_the_bound_that_binds_first() {
     assert_eq!(bet.amount, 10.0);
 }
 
-/// Exact: each policy's sequence over a fixed win/loss script. State plus
-/// update, no rescanning of history, so the whole claim is checkable by hand.
+/// Exact: each policy's bet sequence over a fixed win/loss script.
 #[test]
 fn policies_follow_their_progressions() {
     let bounds = Bounds {
@@ -309,8 +295,7 @@ fn policies_follow_their_progressions() {
     }
 }
 
-/// Statistical, and the first thing that exercises the round controller: the
-/// bare pass line with no odds behind it, against the published 1.41%.
+/// Statistical: the bare pass line, no odds, against the published 1.41%.
 #[test]
 fn pass_line_matches_published_edge() {
     const N: u32 = 20_000_000;
@@ -332,12 +317,8 @@ fn pass_line_matches_published_edge() {
     );
 }
 
-/// Statistical: free odds pay true odds, so they carry no edge of their own and
-/// dilute the blended figure on total wager. 5x odds is the published 0.326%.
-///
-/// The tolerance is derived, and the sd here is *not* 1.0: a 5x-odds decision
-/// swings up to +/-6 units, so the spread is measured from the sample rather
-/// than assumed, and the assertion is against the standard error that implies.
+/// Statistical: 5x free odds dilute the blended edge on total wager to the
+/// published 0.326%, with the spread measured from the sample.
 #[test]
 fn free_odds_dilute_the_blended_edge() {
     const N: u32 = 20_000_000;
@@ -367,11 +348,8 @@ fn free_odds_dilute_the_blended_edge() {
     );
 }
 
-/// Exact-ish and cheap: the controller's shape, not its edge. Come-out sevens
-/// and craps resolve in one roll at 1 unit; a point decision wagers the odds too
-/// and pays true odds on the point. Asserting the *pairs* catches a controller
-/// that got the right net with the wrong denominator, which is the failure the
-/// blended figure would otherwise hide.
+/// Exact on shape: at 2x odds every `(net, wagered)` pair is one the pass line
+/// can produce.
 #[test]
 fn pass_line_outcomes_are_well_formed() {
     let mut rng = Rng::seed(0x1CE);
@@ -397,10 +375,8 @@ fn pass_line_outcomes_are_well_formed() {
     }
 }
 
-/// The generator sees no bet size, so scaling the stake scales net and wager
-/// linearly and leaves the edge untouched. That invariant is what lets the trial
-/// loop own bet sizing and the policies own progression, with neither able to
-/// change a house edge by accident.
+/// Exact: scaling the stake scales net and wager linearly and leaves the edge
+/// unchanged.
 #[test]
 fn edge_is_invariant_to_stake() {
     let table = roulette_even_money(2);
@@ -421,8 +397,7 @@ fn edge_is_invariant_to_stake() {
     assert!(((-net_a / wag_a) - (-net_b / wag_b)).abs() < 1e-12);
 }
 
-/// A fixed seed must give a fixed stream, or every statistical test above is
-/// unreproducible and the site's numbers cannot be regenerated from a config.
+/// Exact: a fixed seed gives a fixed stream, and `uniform` stays in `[0, 1)`.
 #[test]
 fn seeding_is_deterministic() {
     let draw = |seed| {
@@ -441,18 +416,8 @@ fn seeding_is_deterministic() {
     }
 }
 
-/// Statistical, and the whole blackjack correctness claim: the transcribed
-/// basic-strategy chart reproduces the Wizard of Odds figures for the locked
-/// rule set. Everything is PER INITIAL BET, which is how blackjack edges are
-/// published; the element of risk on total wager is ~0.56% and is a different
-/// number (see `run_trials_drives_a_blackjack_shoe`).
-///
-/// Continuous shuffle (penetration 0.0, reshuffle every hand) is the clean check,
-/// because it is independent of the cut-card penetration assumption. Closing Q7:
-/// these WoO figures are the source the composed 0.63% / 2.02% were checked
-/// against; the engine models total-dependent basic strategy with a cut card, so
-/// it reproduces the "cut card" basis, and the printed ratio is 3.13x, not the
-/// 3.21x of the composition-dependent basis.
+/// Statistical: the chart reproduces the Wizard of Odds per-initial-bet edges
+/// for the locked rules, at continuous shuffle and at the cut card.
 #[test]
 fn blackjack_reproduces_wizard_of_odds() {
     const N: u64 = 30_000_000;
@@ -465,10 +430,8 @@ fn blackjack_reproduces_wizard_of_odds() {
         (csm - 0.0061873).abs() / se
     );
 
-    // The shipped cut-card game (penetration 0.75). WoO: 3:2 0.63873%, 6:5
-    // 1.99842%. 3:2 and 6:5 share one seed, so they deal identical hands and
-    // their difference is 0.3 * the paid-natural rate with almost no sampling
-    // noise, pinning the natural/payout handling a single edge cannot.
+    // The shipped cut-card game. One seed for both payouts, so they deal
+    // identical hands and their gap isolates the paid naturals.
     let (e32, se32) = bj_edge(0.75, 1.5, N, 0x5EED_BEEF);
     let (e65, se65) = bj_edge(0.75, 1.2, N, 0x5EED_BEEF);
     assert!(
@@ -482,9 +445,8 @@ fn blackjack_reproduces_wizard_of_odds() {
         (e65 - 0.0199842).abs() / se65
     );
 
-    // Paid-natural gap: (1.5 - 1.2) * rate = e65 - e32. Six-deck theory is
-    // 0.045323, so the gap is 0.0135969. Its se here is ~1e-5, so 1e-4 is a wide
-    // guard that still trips on a misordered peek or a dropped both-natural push.
+    // Gap = (1.5 - 1.2) * paid-natural rate (six-deck 0.045323). Its se is
+    // ~1e-5, so 1e-4 is a wide guard.
     let gap = e65 - e32;
     assert!(
         (gap - 0.0135969).abs() < 1e-4,
@@ -501,10 +463,8 @@ fn blackjack_reproduces_wizard_of_odds() {
     );
 }
 
-/// The tight chart check: a few wrong cells in a cold part of the chart move the
-/// edge too little for the 4-se window at 3e7 to catch. This runs 2e8 hands, so
-/// the se on the CSM figure is ~6e-5 and a stray cell shows up. Ignored by
-/// default; run with `cargo test --release -- --ignored`.
+/// Statistical: 2e8 continuous-shuffle hands (se ~6e-5) against 0.61873%.
+/// Ignored by default; run with `cargo test --release -- --ignored`.
 #[test]
 #[ignore = "high-N chart validation; run with --release -- --ignored (a few minutes)"]
 fn blackjack_chart_high_precision() {
@@ -517,9 +477,8 @@ fn blackjack_chart_high_precision() {
     );
 }
 
-/// The blackjack path through the real trial loop, and the one place `total_staked`
-/// and the two edge denominators are exercised together: a `Shoe` carries state,
-/// so `run_trials` builds a fresh one per trial through the closure.
+/// Statistical: a blackjack shoe through `run_trials`, checking `total_staked`
+/// and the two edge denominators together.
 #[test]
 fn run_trials_drives_a_blackjack_shoe() {
     let cfg = TrialConfig {
@@ -559,4 +518,30 @@ fn run_trials_drives_a_blackjack_shoe() {
     let eor = realized_edge(&result);
     assert!(he > 0.0 && he < 0.03, "house edge {he}");
     assert!(eor < he, "element of risk {eor} not below house edge {he}");
+}
+
+/// Exact: a trial that drops below the base bet on its final round is ruined.
+#[test]
+fn ruin_on_the_final_round_is_counted() {
+    let run = |rounds: u32| {
+        let cfg = TrialConfig {
+            trials: 10,
+            rounds,
+            bankroll: 3.0,
+            bounds: Bounds {
+                base: 1.0,
+                table_max: 1.0,
+            },
+            checkpoints: 1,
+            seed: 7,
+            rounds_per_hour: 60.0,
+        };
+        run_trials(&cfg, || {
+            let always_lose = IidTable::new(&[(1.0, -1.0)]);
+            (Round::Single(Generator::Iid(always_lose)), Policy::Flat)
+        })
+    };
+
+    assert_eq!(run(2).ruined, 0, "one unit left still covers the base bet");
+    assert_eq!(run(3).ruined, 10, "every trial busts on its last round");
 }
