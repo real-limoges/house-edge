@@ -2,10 +2,9 @@
 //! and a few functions taking integers and floats: an allocator pair and one
 //! entry point that takes a flat `f64` config and writes a flat `f64` result.
 //!
-//! The protocol is specified in `docs/reference/rust/05-calling-the-engine-from-the-browser.md`;
-//! this file is the implementation of it (build-order step 2, clearing T16). The
-//! composition it transports, and the unit rules, are in
-//! `docs/reference/rust/04-composing-a-simulation.md`.
+//! The config layout is the `CFG_*` slot constants below; the result is a fixed
+//! header of run totals followed by the sampled bankroll paths. JS reads both
+//! positionally, so slots only ever append.
 
 use std::alloc::{alloc as rust_alloc, dealloc as rust_dealloc, Layout};
 
@@ -17,11 +16,8 @@ use house_edge_engine::generators::{
 use house_edge_engine::policies::{Bounds, Policy};
 use house_edge_engine::rng::Rng;
 
-/// Reserve `len` bytes in linear memory and hand back the offset. JS writes the
-/// config here and reads the result back out of a second reservation.
-///
-/// Returns null on failure, which is a valid sentinel because offset 0 is never
-/// a live allocation in this module.
+/// Reserve `len` bytes of linear memory, 8-aligned, and return the offset.
+/// Returns null for `len == 0` or on failure; offset 0 is never a live allocation.
 #[no_mangle]
 pub extern "C" fn engine_alloc(len: usize) -> *mut u8 {
     if len == 0 {
@@ -35,11 +31,9 @@ pub extern "C" fn engine_alloc(len: usize) -> *mut u8 {
     }
 }
 
-/// JS must return every reservation. Nothing on this side tracks them, so a
-/// caller that forgets leaks for the lifetime of the page.
-///
-// This is a C-ABI export called from JS, so it cannot be `unsafe fn`; the raw
-// pointer is the boundary, not a bug.
+/// Release a reservation; `len` must be the length `engine_alloc` was given.
+/// Null or zero `len` is a no-op. Nothing tracks reservations, so a missed free leaks.
+// C-ABI export called from JS: cannot be `unsafe fn`; the raw pointer is the boundary.
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[no_mangle]
 pub extern "C" fn engine_free(ptr: *mut u8, len: usize) {
@@ -75,14 +69,8 @@ pub const ERR_BAD_GAME: i32 = -2;
 pub const ERR_BAD_TABLE: i32 = -3;
 pub const ERR_OUT_TOO_SMALL: i32 = -4;
 
-/// Game selectors, in `CFG_GAME`. These are the wasm boundary's half of the
-/// enum-dispatch contract: a game is a variant, adding one means adding a code
-/// here and recompiling (decision 0002). JS indexes them positionally, so the
-/// numbering is append-only for the same reason the config slots are.
-///
-/// Each game reads at most one scalar out of `CFG_VARIANT`; a game whose shape
-/// needs more than one scalar (the parlay copula wants a whole vector of leg
-/// probabilities) does not fit this flat boundary and is not offered here.
+/// Game selectors, in `CFG_GAME`; each reads at most one scalar from `CFG_VARIANT`.
+/// Append-only, like the config slots.
 const GAME_ROULETTE_STRAIGHT_UP: u32 = 0; // variant: green zeros on the wheel
 const GAME_ROULETTE_EVEN_MONEY: u32 = 1; // variant: green zeros on the wheel
 const GAME_BACCARAT_BANKER: u32 = 2; // variant: unused
@@ -98,14 +86,19 @@ const POLICY_MARTINGALE: u32 = 1;
 const POLICY_FIBONACCI: u32 = 2;
 const POLICY_DALEMBERT: u32 = 3;
 
-/// The three face-up cards' worth of odd-mixing constant `run_trials` uses to
-/// decorrelate per-trial streams. A blackjack shoe needs its own construction
-/// rng (the play stream belongs to `run_trials`), and reusing this constant
-/// keeps that construction seed a deterministic function of the run seed.
+/// The odd mixing constant `run_trials` uses for per-trial seeds; must match it.
 const GOLDEN: u64 = 0x9E37_79B9_7F4A_7C15;
 
-/// Fresh policy for one trial. Unknown codes are rejected before the run starts,
-/// so the caller here has already been validated.
+/// The top bit, XORed into every shuffle seed so none equals a play seed.
+const SHUFFLE_SALT: u64 = 1 << 63;
+
+/// The seed for one trial's blackjack shoe shuffle.
+/// Never equal to any trial's play seed, `seed ^ trial * GOLDEN`.
+fn shuffle_seed(seed: u64, trial: u64) -> u64 {
+    seed ^ (trial.wrapping_mul(GOLDEN) ^ SHUFFLE_SALT)
+}
+
+/// Fresh policy for one trial. `code` must already be validated.
 fn make_policy(code: u32) -> Policy {
     match code {
         POLICY_MARTINGALE => Policy::Martingale { streak: 0 },
@@ -119,7 +112,12 @@ fn make_policy(code: u32) -> Policy {
 // the boundary; both are null-checked and length-checked before any deref.
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[no_mangle]
-pub extern "C" fn engine_run(cfg: *const f64, cfg_len: usize, out: *mut f64, out_len: usize) -> i32 {
+pub extern "C" fn engine_run(
+    cfg: *const f64,
+    cfg_len: usize,
+    out: *mut f64,
+    out_len: usize,
+) -> i32 {
     if cfg.is_null() || out.is_null() || cfg_len != CFG_LEN {
         return ERR_BAD_LEN;
     }
@@ -129,9 +127,8 @@ pub extern "C" fn engine_run(cfg: *const f64, cfg_len: usize, out: *mut f64, out
     let rounds = cfg[CFG_ROUNDS] as usize;
     let checkpoints = cfg[CFG_CHECKPOINTS] as usize;
 
-    // `run_trials` asserts on zero rounds or checkpoints, and an assert here is
-    // a silent trap rather than an error (panic = "abort", no hook). A degenerate
-    // size is a malformed config, so it gets a status code before it can trap.
+    // `run_trials` asserts on zero rounds or checkpoints, and under
+    // panic = "abort" an assert is a silent trap, so these get a status code.
     if trials == 0 || rounds == 0 || checkpoints == 0 {
         return ERR_BAD_LEN;
     }
@@ -143,10 +140,8 @@ pub extern "C" fn engine_run(cfg: *const f64, cfg_len: usize, out: *mut f64, out
     let policy = cfg[CFG_POLICY] as u32;
     let variant = cfg[CFG_VARIANT];
 
-    // Validate both selectors up front so a full run is never spent to then fail
-    // on the way out. There is no dedicated policy-error code, so an unknown
-    // policy reuses ERR_BAD_GAME: both are "the caller named something that does
-    // not exist," which is what JS validates against before calling.
+    // Validate both codes before spending a run.
+    // An unknown policy reuses ERR_BAD_GAME; there is no policy-error code.
     if !matches!(
         game,
         GAME_ROULETTE_STRAIGHT_UP
@@ -166,18 +161,15 @@ pub extern "C" fn engine_run(cfg: *const f64, cfg_len: usize, out: *mut f64, out
         return ERR_BAD_GAME;
     }
 
-    // The odds multiple and blackjack payout are floats the reader can move, so a
-    // negative one would be a nonsense bet. Reject it rather than let it flow into
-    // a table constructor that might assert.
+    // A NaN or negative odds multiple or payout is a nonsense bet; reject it
+    // before a table constructor can assert on it.
     if (game == GAME_CRAPS_PASS_LINE || game == GAME_BLACKJACK)
         && (variant.is_nan() || variant < 0.0)
     {
         return ERR_BAD_TABLE;
     }
 
-    // Reassemble the seed before anything else touches it. It crosses as two
-    // 32-bit halves because a u64 above 2^53 does not survive a round-trip
-    // through f64; see the boundary doc.
+    // Two 32-bit halves, because a u64 above 2^53 does not survive f64.
     let seed = ((cfg[CFG_SEED_HI] as u64) << 32) | (cfg[CFG_SEED_LO] as u64);
 
     let trial_cfg = TrialConfig {
@@ -193,18 +185,12 @@ pub extern "C" fn engine_run(cfg: *const f64, cfg_len: usize, out: *mut f64, out
         rounds_per_hour: cfg[CFG_ROUNDS_PER_HOUR],
     };
 
-    // `run_trials` builds a fresh (Round, Policy) per trial through this closure,
-    // because a Shoe carries state and reusing it across trials would correlate
-    // them through the shoe. The stateless tables are cheap to rebuild, so every
-    // game takes the same per-trial construction path.
-    //
-    // `k` counts trials so the blackjack shoe's construction shuffle gets a
-    // distinct, run-seed-derived stream per trial. The play stream is the rng
-    // `run_trials` owns; the two must not be the same, or the shuffle and the
-    // play would share bits.
-    let mut k = 0u64;
+    // A fresh (Round, Policy) per trial, since a reused Shoe would correlate trials.
+    // `next_trial` tracks `run_trials`' trial index, which calls this once per trial.
+    let mut next_trial = 0u64;
     let result = run_trials(&trial_cfg, || {
-        k += 1;
+        let trial = next_trial;
+        next_trial += 1;
         let round = match game {
             GAME_ROULETTE_STRAIGHT_UP => {
                 Round::Single(Generator::Iid(roulette_straight_up(variant as u32)))
@@ -219,7 +205,7 @@ pub extern "C" fn engine_run(cfg: *const f64, cfg_len: usize, out: *mut f64, out
                 odds_multiple: variant,
             },
             GAME_BLACKJACK => {
-                let mut construction = Rng::seed(seed ^ k.wrapping_mul(GOLDEN));
+                let mut construction = Rng::seed(shuffle_seed(seed, trial));
                 let rules = BjRules::locked(variant);
                 let shoe = Shoe::new(rules, locked_h17_strategy(), &mut construction);
                 Round::Single(Generator::Shoe(shoe))
@@ -230,9 +216,7 @@ pub extern "C" fn engine_run(cfg: *const f64, cfg_len: usize, out: *mut f64, out
         (round, make_policy(policy))
     });
 
-    // Header, in the order the JS side reads it (see the boundary doc). Note that
-    // total_staked is deliberately not exported: this header carries the element-
-    // of-risk denominator (total_wagered), not the per-initial-bet one.
+    // Header, in the order JS reads it. `total_staked` is deliberately absent.
     let out = unsafe { std::slice::from_raw_parts_mut(out, out_len) };
     out[0] = f64::from(result.ruined);
     out[1] = result.total_wagered;
@@ -246,4 +230,28 @@ pub extern "C" fn engine_run(cfg: *const f64, cfg_len: usize, out: *mut f64, out
     out[OUT_HEADER..OUT_HEADER + result.paths.len()].copy_from_slice(&result.paths);
 
     OK
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The play seed `run_trials` derives for trial `t`.
+    fn play_seed(seed: u64, trial: u64) -> u64 {
+        seed ^ trial.wrapping_mul(GOLDEN)
+    }
+
+    /// No trial's shuffle seed equals any trial's play seed, its own and its neighbors' included.
+    #[test]
+    fn shuffle_seeds_never_meet_play_seeds() {
+        let seed = 0x1234_5678_9ABC_DEF0;
+        let play: std::collections::HashSet<u64> =
+            (0..10_000).map(|t| play_seed(seed, t)).collect();
+        for t in 0..10_000 {
+            assert!(
+                !play.contains(&shuffle_seed(seed, t)),
+                "trial {t}'s shuffle seed is a play seed"
+            );
+        }
+    }
 }

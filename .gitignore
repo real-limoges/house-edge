@@ -1,7 +1,9 @@
 # ---------------------------------------------------------------------------
-# Agent-facing notes. Not shared, so nothing tracked may cite them.
+# Agent-facing notes. Not shared, so nothing tracked may cite them, except
+# docs/reference/, the one committed part of the tree.
 # ---------------------------------------------------------------------------
-docs/
+docs/*
+!docs/reference/
 CLAUDE.md
 
 # ---------------------------------------------------------------------------

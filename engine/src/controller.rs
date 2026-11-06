@@ -10,11 +10,8 @@ fn roll(rng: &mut Rng) -> u32 {
     d1 + d2
 }
 
-/// Pass line with `odds_multiple` in free odds taken behind the point.
-///
-/// Odds bet only pays true odds - no edge of its own.
-/// It can only be placed once a point is established, so it dilutes the
-/// blended edge (and doesn't change the pass-line math.)
+/// One pass-line decision with `odds_multiple` units of free odds behind the point.
+/// `wagered` is 1.0 on a come-out decision and `1.0 + odds_multiple` once a point is set.
 pub fn pass_line(rng: &mut Rng, odds_multiple: f64) -> Outcome {
     match roll(rng) {
         7 | 11 => Outcome {
@@ -61,7 +58,7 @@ pub struct TrialConfig {
     pub bounds: Bounds,
     pub checkpoints: u32, // number of x-positions for the fan chart
     pub seed: u64,
-    pub rounds_per_hour: f64, // independent of stuff, important for bacarat
+    pub rounds_per_hour: f64, // touches no draw; only sets `elapsed_hours` (baccarat's chapter)
 }
 
 pub struct TrialResult {
@@ -69,27 +66,21 @@ pub struct TrialResult {
     pub paths: Vec<f64>,
     pub trials: u32,
     pub ruined: u32,
-    /// Sum of every bet placed, double and split money included. The denominator
-    /// for the element-of-risk edge (craps free odds live here).
+    /// Sum of every bet placed, with double, split and free-odds money included.
     pub total_wagered: f64,
-    /// Sum of the initial bet on each decision, before any double or split adds
-    /// to it. The denominator for the per-initial-bet house edge, which is how
-    /// blackjack and the other table games are published.
+    /// Sum of the initial bet on each decision, before any double or split.
     pub total_staked: f64,
     pub total_net: f64,
     pub capped_by_table: u64,
     pub capped_by_bankroll: u64,
-    /// `rounds / rounds_per_hour` so the chart axis and ledger
-    /// cannot disagree.
+    /// `rounds / rounds_per_hour`: the length of one trial, in hours.
     pub elapsed_hours: f64,
 }
 
 pub enum Round {
-    /// This is a single decision (any thing you can imagine besides craps)
+    /// One generator draw is one decision.
     Single(Generator),
-    /// Geometric stopping time. Dice rolled directly.
-    /// I want to see the individual die rolls, even though it
-    /// is computed at once.
+    /// Rolls dice until the pass line resolves, as one decision.
     CrapsPassLine { odds_multiple: f64 },
 }
 
@@ -103,10 +94,9 @@ impl Round {
     }
 }
 
-/// Builds a fresh round + policy per trial.
-/// I made this a closure rather than two values because `Shoe` carries state.
-/// Reusing trials would corelate them through the show.
-/// The trials need to be independent for the p-bands to mean anything.
+/// Runs `cfg.trials` trials of `cfg.rounds` decisions each, calling `make_trial`
+/// once per trial for a fresh round and policy. Panics if `rounds` or
+/// `checkpoints` is zero.
 pub fn run_trials<F>(cfg: &TrialConfig, mut make_trial: F) -> TrialResult
 where
     F: FnMut() -> (Round, Policy),
@@ -137,8 +127,7 @@ where
         let mut next_c = 0usize;
 
         for r in 0..cfg.rounds {
-            // Ruin is bankroll you can't cover the base bet.
-            // So holding $5 at a $10 means you're ruined.
+            // Ruin is a bankroll that can't cover the base bet: $5 at a $10 table.
             if !ruined && bankroll < cfg.bounds.base {
                 ruined = true;
             }
@@ -165,8 +154,8 @@ where
                 }
             }
 
-            // Absorbing ruin. Once `bankroll` stops moving everything is flat.
-            // This just makes sure that there isn't a survivorship bias
+            // Ruin is absorbing: a ruined path holds flat, so the bands carry no
+            // survivorship bias.
             while next_c < checkpoints
                 && (u64::from(r) + 1) * checkpoints as u64
                     >= (next_c as u64 + 1) * u64::from(cfg.rounds)
@@ -176,7 +165,9 @@ where
             }
         }
 
-        if ruined {
+        // The top-of-round check never sees the last round's bankroll, so a
+        // trial that busts on its final bet is counted here.
+        if ruined || bankroll < cfg.bounds.base {
             out.ruined += 1;
         }
     }

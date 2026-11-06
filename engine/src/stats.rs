@@ -21,7 +21,7 @@ pub fn percentile_bands(paths: &[f64], trials: usize, checkpoints: usize, levels
         for (t, slot) in column.iter_mut().enumerate() {
             *slot = paths[t * checkpoints + c];
         }
-        column.sort_by(|a, b| a.partial_cmp(b).expect("NaN in a trajetory"));
+        column.sort_by(|a, b| a.partial_cmp(b).expect("NaN in a trajectory"));
 
         for (l, level) in levels.iter().enumerate() {
             values[l * checkpoints + c] = quantile_sorted(&column, *level);
@@ -38,7 +38,7 @@ pub fn percentile_bands(paths: &[f64], trials: usize, checkpoints: usize, levels
 fn quantile_sorted(sorted: &[f64], level: f64) -> f64 {
     assert!(
         (0.0..=1.0).contains(&level),
-        "percentile {level} not in [0, 1)",
+        "percentile {level} not in [0, 1]",
     );
     let n = sorted.len();
     if n == 1 {
@@ -54,18 +54,14 @@ pub fn ruin_probability(r: &TrialResult) -> f64 {
     f64::from(r.ruined) / f64::from(r.trials)
 }
 
-/// Element-of-risk edge: expected loss per unit of *total* money wagered, double
-/// and split and free-odds money included. This is the published convention for
-/// craps combined-odds (the 0.326% at 5x odds is per total wager).
+/// Element-of-risk edge: loss per unit of *total* money wagered, with double,
+/// split and free-odds money included.
 pub fn realized_edge(r: &TrialResult) -> f64 {
     -r.total_net / r.total_wagered
 }
 
-/// House edge: expected loss per unit of the *initial* bet, ignoring the extra
-/// money a double or split puts up mid-decision. This is the published
-/// convention for blackjack (0.64%, not the ~0.56% element of risk) and it
-/// coincides with `realized_edge` for any game whose decisions stake exactly
-/// one unit.
+/// House edge: loss per unit of the *initial* bet, ignoring money a double or
+/// split adds. Equals `realized_edge` when every decision stakes one unit.
 pub fn house_edge(r: &TrialResult) -> f64 {
     -r.total_net / r.total_staked
 }
