@@ -224,3 +224,123 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TRIALS: usize = 4;
+    const CHECKPOINTS: usize = 10;
+    const FULL: usize = OUT_HEADER + TRIALS * CHECKPOINTS;
+
+    /// Valid config. Even-money roulette on Vegas wheel, flat staking
+    fn config() -> [f64; CFG_LEN] {
+        let mut cfg = [0.0; CFG_LEN];
+        cfg[CFG_GAME] = f64::from(GAME_ROULETTE_EVEN_MONEY);
+        cfg[CFG_VARIANT] = 2.0;
+        cfg[CFG_POLICY] = f64::from(POLICY_FLAT);
+        cfg[CFG_TRIALS] = TRIALS as f64;
+        cfg[CFG_ROUNDS] = 100.0;
+        cfg[CFG_BANKROLL] = 100.0;
+        cfg[CFG_BASE] = 1.0;
+        cfg[CFG_TABLE_MAX] = 50.0;
+        cfg[CFG_CHECKPOINTS] = CHECKPOINTS as f64;
+        cfg[CFG_SEED_HI] = 0.0;
+        cfg[CFG_SEED_LO] = 42.0;
+        cfg[CFG_ROUNDS_PER_HOUR] = 60.0;
+        cfg
+    }
+
+    /// Call the export like JS - config in, NaN filled buffer out
+    fn run(cfg: &[f64], out_len: usize) -> (i32, Vec<f64>) {
+        let mut out = vec![f64::NAN; out_len];
+        let status = engine_run(cfg.as_ptr(), cfg.len(), out.as_mut_ptr(), out.len());
+        (status, out)
+    }
+
+    fn with(slot: usize, value: f64) -> [f64; CFG_LEN] {
+        let mut cfg = config();
+        cfg[slot] = value;
+        cfg
+    }
+
+    #[test]
+    fn same_seed_output() {
+        assert_eq!(run(&config(), FULL), run(&config(), FULL));
+    }
+
+    #[test]
+    fn seed_halves_keep_its_above_2_pow_53() {
+        // 2^53 == 2^53 + 1 are the same f64. As two halves they're two seeds
+        let mut low = config();
+        low[CFG_SEED_HI] = f64::from(1u32 << 21);
+        low[CFG_SEED_LO] = 0.0;
+        let mut high = low;
+        high[CFG_SEED_LO] = 1.0;
+        assert_ne!(run(&low, FULL).1, run(&high, FULL).1);
+    }
+
+    #[test]
+    fn every_game_and_policy_runs() {
+        let variants = [1.0, 1.0, 0.0, 0.0, 0.0, 2.0, 1.5];
+        for (game, variant) in variants.iter().enumerate() {
+            for policy in 0...=POLICY_DALEMBERT {
+                let mut cfg = with(CFG_GAME, game as f64);
+                cfg[CFG_VARIANT] = *variant;
+                cfg[CFG_POLICY] = f64::from(policy);
+                assert_eq!(run(&cfg, FULL).0, OK, "game {game}, policy {policy}");
+            }
+        }
+    }
+
+    #[test]
+    fn bad_lengths_are_bad_len() {
+        assert_eq!(run(&config()[..CFG_LEN - 1], FULL).0, ERR_BAD_LEN);
+        let mut out = vec![0.0; FULL];
+        let status = engine_run(std::ptr::null(), CFG_LEN, out.as_mut_ptr(), FULL);
+        assert_eq!(status, ERR_BAD_LEN);
+        for slot in [CFG_TRIALS, CFG_ROUNDS, CFG_CHECKPOINTS] {
+            assert_eq!(run(&with(slot, 0.0), FULL).0, ERR_BAD_LEN, "slot {slot}");
+        }
+    }
+
+    #[test]
+    fn unknown_codes_are_bad_game() {
+        assert_eq!(run(&with(CFG_GAME, 7.0), FULL).0, ERR_BAD_GAME);
+        assert_eq!(run(&with(CFG_POLICY, 4.0), FULL).0, ERR_BAD_GAME);
+    }
+
+    #[test]
+    fn short_output_is_out_too_small() {
+        assert_eq!(run(&config(), FULL - 1.0).0, ERR_OUT_TOO_SMALL);
+    }
+
+    #[test]
+    fn allocator_rejects_zero_and_aligns_to_f64() {
+        assert!(engine_alloc(0).is_null());
+        engine_free(std::ptr::null_mut(), 8);
+
+        let mut = engine_alloc(96);
+        assert!(!ptr.is_null());
+        assert_eq!(ptr as usize % 8, 0);
+        engine_free(ptr, 96);
+    }
+
+    fn play_seed(seed: u64, trial: u64) -> u64 {
+        seed ^ trial.wrapping_mul(GOLDEN)
+    }
+
+    #[test]
+    fn shuffle_seeds_never_meet_play_seeds() {
+        let seed = 0x1234_5678_9ABC_DEF0;
+        let play: std::collections::HashSet<u64> =
+            (0..10_000).map(|t| play_seed(seed, t)).collect();
+        for t in 0..10_000 {
+            assert!(
+                !play.contains(&shuffle_seed(seed, t)),
+                "trial {t}'s shuffle seed is ia play seed"
+            )
+        }
+    }
+
+}
