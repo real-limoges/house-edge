@@ -1,5 +1,3 @@
-//! `policies.rs`
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Cap {
     None,     // got the bet it asked for
@@ -19,8 +17,7 @@ pub struct Bounds {
     pub table_max: f64,
 }
 
-/// Truncates `desired` to the bounds and reports which one bit: `Table` only
-/// when the table max is itself affordable.
+/// `Table` only when the table max is itself affordable.
 fn clamp(desired: f64, bankroll: f64, b: &Bounds) -> Bet {
     if desired > b.table_max && b.table_max <= bankroll {
         Bet {
@@ -40,7 +37,7 @@ fn clamp(desired: f64, bankroll: f64, b: &Bounds) -> Bet {
     }
 }
 
-/// The `n`th term of 1, 1, 2, 3, 5, ..., counting from 0.
+/// 1, 1, 2, 3, 5, ... from n = 0.
 #[inline]
 fn fib(n: u32) -> f64 {
     let (mut a, mut b) = (1u64, 1u64);

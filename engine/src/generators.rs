@@ -1,5 +1,3 @@
-//! generators.rs
-//!
 //! Sets up all the games. I use Enum dispatch rather than
 //! dyn Traits. I guess it's just a preference + the shape
 //! of things.
@@ -39,9 +37,8 @@ pub struct IidTable {
 }
 
 impl IidTable {
-    /// Builds a table from `(probability, net)` pairs, sorted by descending
-    /// probability. Panics if `outcomes` is empty, a probability is NaN or
-    /// negative, or the probabilities miss 1.0 by 1e-9 or more.
+    /// From `(probability, net)` pairs. Panics on an empty table, a NaN or
+    /// negative probability, or a sum off 1.0.
     pub fn new(outcomes: &[(f64, f64)]) -> Self {
         assert!(!outcomes.is_empty(), "empty outcome table");
         let mut v = outcomes.to_vec();
@@ -71,8 +68,7 @@ impl IidTable {
 
     #[inline]
     pub fn draw(&self, rng: &mut Rng) -> Outcome {
-        // linear, not binary. sorted heaviest first
-        // the branch predictor should beat a binary search
+        // Linear scan: sorted heaviest first, so it beats a binary search.
         let u = rng.uniform();
         let mut i = 0;
         while i + 1 < self.cum.len() && u >= self.cum[i] {
@@ -84,7 +80,7 @@ impl IidTable {
         }
     }
 
-    /// Exact expected net per unit staked, read off the table with no sampling.
+    /// Exact expected net per unit staked.
     pub fn expected_net(&self) -> f64 {
         let mut prev = 0.0;
         let mut ev = 0.0;
@@ -95,7 +91,7 @@ impl IidTable {
         ev
     }
 
-    /// Exact per-round standard deviation of net, read off the table.
+    /// Exact per-round standard deviation of net.
     pub fn sd(&self) -> f64 {
         let mean = self.expected_net();
         let mut prev = 0.0;
@@ -108,8 +104,7 @@ impl IidTable {
     }
 }
 
-/// Single number. 36 pockets + # of zeros.
-/// The edge falls out as `zeros / (36 + zeros)`
+/// Single number. Edge is `zeros / (36 + zeros)`.
 pub fn roulette_straight_up(zeros: u32) -> IidTable {
     let pockets = f64::from(36 + zeros);
     IidTable::new(&[(1.0 / pockets, 35.0), (1.0 - 1.0 / pockets, -1.0)])
@@ -126,18 +121,16 @@ pub fn any_seven() -> IidTable {
     IidTable::new(&[(1.0 / 6.0, 4.0), (5.0 / 6.0, -1.0)])
 }
 
-/// Blackjack Rules
 #[derive(Clone, Copy, Debug)]
 pub struct BjRules {
     pub decks: u32,
-    pub penetration: f64,  // fraction of shoe before the cut card
-    pub hit_soft_17: bool, // what most people have done, costs players 0.22%
+    pub penetration: f64, // fraction dealt before the cut card
+    pub hit_soft_17: bool,
     pub double_after_split: bool,
-    pub max_hands: u32,            // All the hands allowed at once + splits
-    pub split_aces_one_card: bool, // split aces get one card each and then closed.
-    /// Never read by `play_hand`: the chart assumes no surrender.
-    pub surrender: bool,
-    pub blackjack_pays: f64, // Net paid per unit on a natural. (1.5 at 3:2, 1.2 at 6:5)
+    pub max_hands: u32, // including splits
+    pub split_aces_one_card: bool,
+    pub surrender: bool,     // unread: the chart assumes no surrender
+    pub blackjack_pays: f64, // 1.5 at 3:2, 1.2 at 6:5
 }
 
 impl BjRules {
@@ -155,17 +148,15 @@ impl BjRules {
     }
 }
 
-// Shoe: Stateful, sampling *without* replacement, reshuffles.
 pub struct Shoe {
     cards: Vec<u8>,
     pos: usize,
-    rules: BjRules, // resplits, 3:2 vs 6:5, etc...
+    rules: BjRules,
     strategy: &'static StrategyTable,
     pub running_count: i32,
 }
 
-/// One player hand inside a decision, tracked without a card list so the split
-/// tree is `Copy`. `total` counts every ace as 1; `best` promotes one to 11.
+/// No card list, so the split tree is `Copy`. `total` counts aces as 1.
 #[derive(Clone, Copy)]
 struct Hand {
     total: u8,
@@ -212,7 +203,6 @@ impl Hand {
         self.n += 1;
     }
 
-    /// Best total <= 21 if possible, promoting one ace to 11.
     #[inline]
     fn best(&self) -> u8 {
         if self.aces > 0 && self.total + 10 <= 21 {
@@ -234,8 +224,7 @@ impl Hand {
 }
 
 impl Shoe {
-    /// A fresh shoe of `52 * decks` cards for `rules`, shuffled once: per deck,
-    /// four each of ranks 1..=9 and **sixteen** of rank 10.
+    /// Shuffled once. Per deck: four each of ranks 1..=9, sixteen tens.
     pub fn new(rules: BjRules, strategy: &'static StrategyTable, rng: &mut Rng) -> Self {
         let mut cards = Vec::with_capacity(52 * rules.decks as usize);
         for _ in 0..rules.decks {
@@ -257,7 +246,7 @@ impl Shoe {
         shoe
     }
 
-    /// Next card off the top, uncounted: the caller counts it once it is visible.
+    /// Uncounted: the caller counts it once it is visible.
     #[inline]
     fn draw_card(&mut self) -> u8 {
         debug_assert!(
@@ -269,7 +258,6 @@ impl Shoe {
         c
     }
 
-    /// Fold one now-visible card into the running count.
     #[inline]
     fn count(&mut self, rank: u8) {
         self.running_count += Self::hi_lo(rank);
@@ -313,10 +301,9 @@ impl Shoe {
             self.shuffle(rng);
         }
     }
-    /// One blackjack decision: deal, resolve naturals, play the player's hands
-    /// (splits included) against basic strategy, play the dealer, and settle.
-    /// Returns a single `Outcome` for the whole tree, `net` in base-bet units
-    /// and `wagered` the sum of every bet placed.
+
+    /// One decision, splits included. `net` is in base-bet units; `wagered`
+    /// sums every bet placed.
     pub fn play_hand(&mut self, rng: &mut Rng) -> Outcome {
         self.maybe_reshuffle(rng);
         debug_assert!(
@@ -324,12 +311,11 @@ impl Shoe {
             "split array assumes max_hands <= 4"
         );
 
-        // Table order: player, dealer up, player, dealer hole.
         let p1 = self.draw_card();
         let up = self.draw_card();
         let p2 = self.draw_card();
         let hole = self.draw_card();
-        // Only the three face-up cards are counted now; the hole waits.
+        // The hole card is counted when revealed.
         self.count(p1);
         self.count(up);
         self.count(p2);
@@ -337,8 +323,7 @@ impl Shoe {
         let dealer_bj = (up == 1 && hole == 10) || (up == 10 && hole == 1);
         let player_bj = (p1 == 1 && p2 == 10) || (p1 == 10 && p2 == 1);
 
-        // The dealer peeks on a ten or an ace. A natural ends the decision with
-        // exactly one unit at risk: no split, no double money goes up.
+        // Dealer peeks on a ten or ace; a natural ends it with one unit at risk.
         if (up == 1 || up == 10) && dealer_bj {
             self.count(hole);
             return if player_bj {
@@ -354,7 +339,6 @@ impl Shoe {
             };
         }
         if player_bj {
-            // Dealer cannot have a natural here (peeked, or upcard is 2..9).
             self.count(hole);
             return Outcome {
                 net: self.rules.blackjack_pays,
@@ -370,7 +354,6 @@ impl Shoe {
         while let Some(i) = (0..4).find(|&i| matches!(hands[i], Some(h) if !h.resolved)) {
             let h = hands[i].unwrap();
 
-            // Pair: split if the chart says so and a slot remains.
             let free = (0..4).find(|&j| hands[j].is_none());
             let occupied = hands.iter().filter(|x| x.is_some()).count() as u32;
             if h.is_pair() && occupied < self.rules.max_hands {
@@ -386,8 +369,7 @@ impl Shoe {
                         let mut hj = Hand::two(rank, c_j, 1.0);
                         hi.from_split = true;
                         hj.from_split = true;
-                        // Split aces take one card each and close. A 21 here is not
-                        // a natural: settlement pays it even money.
+                        // A 21 on split aces is not a natural: it pays even money.
                         if rank == 1 && self.rules.split_aces_one_card {
                             hi.split_ace = true;
                             hi.resolved = true;
@@ -440,10 +422,8 @@ impl Shoe {
             hands[i] = Some(hh);
         }
 
-        // The hole card is now revealed, whatever happens next.
         self.count(hole);
 
-        // The dealer draws only if at least one player hand is still live.
         let any_live = hands.iter().flatten().any(|h| !h.busted);
         let mut dealer_total = 0u8;
         if any_live {
@@ -465,8 +445,6 @@ impl Shoe {
         }
         let dealer_bust = any_live && dealer_total > 21;
 
-        // Settle per hand: a busted hand loses its own bet whatever the dealer
-        // does; otherwise compare totals, equal is a push.
         let mut net = 0.0;
         let mut wagered = 0.0;
         for h in hands.iter().flatten() {
@@ -487,9 +465,7 @@ impl Shoe {
         Outcome { net, wagered }
     }
 
-    /// Basic-strategy action for a non-pair hand: soft chart when an ace can be
-    /// eleven (soft 13..20), otherwise the hard chart on the best total. Soft 12
-    /// (A,A played without a split slot) and soft 21 fall through to hard.
+    /// Soft 12 (unsplittable A,A) and soft 21 fall through to the hard chart.
     fn decide(&self, h: &Hand, up_col: usize) -> Action {
         let b = h.best();
         if h.soft() && (13..=20).contains(&b) {
@@ -502,33 +478,22 @@ impl Shoe {
     }
 }
 
-/// One strategy-chart cell.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     Hit,
     Stand,
-    // Double if two-card hand and doubling is *legal*, otherwise hit.
-    // Every hard-total double carries this as the fallback.
     DoubleElseHit,
-    // Double if legal. Only on soft 18/19. Only where a forbidden
-    // double *must not* turn into a hit.
-    DoubleElseStand,
+    DoubleElseStand, // soft 18/19, where a refused double must not hit
 }
 
-/// Basic-strategy charts, columns by `up_index`. Splitting is a separate `bool`
-/// plane, not an `Action`; a `false` cell falls through to `hard` or `soft`.
+/// Columns by `up_index`. A `false` split cell falls through to `hard` or `soft`.
 pub struct StrategyTable {
-    /// Player hard total 4..=21. Index `total - 4`
-    pub hard: [[Action; 10]; 18],
-    /// Player soft total 13..=20. Index `total - 13`. A,A with no split slot
-    /// left plays as hard 12.
-    pub soft: [[Action; 10]; 8],
-    /// Pairs by rank: A,A is `0`, and `1..=9` are 2,2 through 10,10.
-    pub split: [[bool; 10]; 10],
+    pub hard: [[Action; 10]; 18], // total 4..=21
+    pub soft: [[Action; 10]; 8],  // total 13..=20
+    pub split: [[bool; 10]; 10],  // A,A at 0, then 2,2 through 10,10
 }
 
-/// Dealer upcard to column. 2..=9 maps to 0..=7.
-/// Ten goes to 8, Ace goes to 9.
+/// Upcards 2..=9 to 0..=7, ten to 8, ace to 9.
 #[inline]
 pub fn up_index(rank: u8) -> usize {
     match rank {
@@ -538,10 +503,8 @@ pub fn up_index(rank: u8) -> usize {
     }
 }
 
-/// The total-dependent basic-strategy chart for the locked rule set: six decks,
-/// dealer hits soft 17, double any two, double after split, resplit to four,
-/// split aces one card, no surrender. Transcribed from the Wizard of Odds
-/// calculator (columns are dealer 2,3,4,5,6,7,8,9,10,A via `up_index`).
+/// Basic strategy for `BjRules::locked`, transcribed from the Wizard of Odds
+/// calculator.
 pub fn locked_h17_strategy() -> &'static StrategyTable {
     static TABLE: OnceLock<StrategyTable> = OnceLock::new();
     TABLE.get_or_init(build_locked_h17)
@@ -550,7 +513,7 @@ pub fn locked_h17_strategy() -> &'static StrategyTable {
 fn build_locked_h17() -> StrategyTable {
     use Action::{DoubleElseHit as Dh, DoubleElseStand as Ds, Hit as H, Stand as S};
 
-    // Player hard total 4..=21 (index total - 4). Columns 2..A.
+    // Columns: dealer 2..9, 10, A.
     let hard = [
         [H, H, H, H, H, H, H, H, H, H],           // 4
         [H, H, H, H, H, H, H, H, H, H],           // 5
@@ -572,7 +535,6 @@ fn build_locked_h17() -> StrategyTable {
         [S, S, S, S, S, S, S, S, S, S],           // 21
     ];
 
-    // Player soft total 13..=20, i.e. A,2 through A,9 (index total - 13).
     let soft = [
         [H, H, H, Dh, Dh, H, H, H, H, H],    // 13 A,2
         [H, H, H, Dh, Dh, H, H, H, H, H],    // 14 A,3
@@ -584,38 +546,34 @@ fn build_locked_h17() -> StrategyTable {
         [S, S, S, S, S, S, S, S, S, S],      // 20 A,9
     ];
 
-    // Pairs, indexed by rank: 0 is A,A, 1..=9 are 2,2 through 10,10.
     let (t, f) = (true, false);
     let split = [
         [t, t, t, t, t, t, t, t, t, t], // A,A
         [t, t, t, t, t, t, f, f, f, f], // 2,2
         [t, t, t, t, t, t, f, f, f, f], // 3,3
         [f, f, f, t, t, f, f, f, f, f], // 4,4
-        [f, f, f, f, f, f, f, f, f, f], // 5,5  (hard 10, never split)
+        [f, f, f, f, f, f, f, f, f, f], // 5,5
         [t, t, t, t, t, f, f, f, f, f], // 6,6
         [t, t, t, t, t, t, f, f, f, f], // 7,7
         [t, t, t, t, t, t, t, t, t, t], // 8,8
         [t, t, t, t, t, f, t, t, f, f], // 9,9
-        [f, f, f, f, f, f, f, f, f, f], // 10,10 (stand, never split)
+        [f, f, f, f, f, f, f, f, f, f], // 10,10
     ];
 
     StrategyTable { hard, soft, split }
 }
 
-/// Parlay generator: binary legs sharing one pairwise correlation `rho`
-/// (a single-factor Gaussian copula).
+/// Parlay legs sharing one pairwise correlation (single-factor Gaussian copula).
 pub struct Copula {
-    /// Per-leg `probit(p_win)`; a leg wins when its normal falls below this.
-    thresholds: Vec<f64>,
-    rho: f64, // correlation
+    thresholds: Vec<f64>, // probit(p_win) per leg
+    rho: f64,
     sqrt_rho: f64,
     sqrt_one_minus_rho: f64,
-    payout: f64, // Net paid per unit staked when *every* leg wins
+    payout: f64, // net when every leg wins
 }
 
 impl Copula {
-    /// `legs` are per-leg win probabilities and `payout` is the net paid per
-    /// unit when every leg wins. Panics on no legs or `rho` outside `[0, 1)`.
+    /// Panics on no legs or `rho` outside `[0, 1)`.
     pub fn new(legs: &[f64], rho: f64, payout: f64) -> Self {
         assert!(!legs.is_empty(), "parlay with no legs");
         assert!((0.0..1.0).contains(&rho), "rho {rho} is outside [0, 1)");
@@ -628,8 +586,6 @@ impl Copula {
         }
     }
 
-    /// One parlay decision staking one unit: `payout` if every leg wins,
-    /// otherwise -1.0.
     #[inline]
     pub fn draw_bundle(&self, rng: &mut Rng) -> Outcome {
         let f = rng.normal();
@@ -649,14 +605,12 @@ impl Copula {
         }
     }
 
-    /// The pairwise correlation between legs.
     pub fn rho(&self) -> f64 {
         self.rho
     }
 }
 
-/// Eight-deck baccarat banker bet. Wins pay 0.95 after the 5% commission, and a
-/// tie pushes (`net` 0.0, `wagered` 1.0).
+/// Eight decks, 5% commission; a tie pushes.
 pub fn baccarat_banker() -> IidTable {
     IidTable::new(&[(0.458597, 0.95), (0.446247, -1.0), (0.095156, 0.0)])
 }
@@ -665,7 +619,7 @@ pub fn baccarat_player() -> IidTable {
     IidTable::new(&[(0.446247, 1.0), (0.458597, -1.0), (0.095156, 0.0)])
 }
 
-/// Decimal odds, stake included, for American odds.
+/// Decimal odds include the stake.
 pub fn american_to_decimal(odds: f64) -> f64 {
     if odds > 0.0 {
         1.0 + odds / 100.0

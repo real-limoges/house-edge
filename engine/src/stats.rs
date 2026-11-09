@@ -54,14 +54,12 @@ pub fn ruin_probability(r: &TrialResult) -> f64 {
     f64::from(r.ruined) / f64::from(r.trials)
 }
 
-/// Element-of-risk edge: loss per unit of *total* money wagered, with double,
-/// split and free-odds money included.
+/// Element of risk: loss per unit of total money wagered.
 pub fn realized_edge(r: &TrialResult) -> f64 {
     -r.total_net / r.total_wagered
 }
 
-/// House edge: loss per unit of the *initial* bet, ignoring money a double or
-/// split adds. Equals `realized_edge` when every decision stakes one unit.
+/// Loss per unit of initial bet.
 pub fn house_edge(r: &TrialResult) -> f64 {
     -r.total_net / r.total_staked
 }

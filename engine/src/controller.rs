@@ -2,7 +2,6 @@ use crate::generators::{Generator, Outcome};
 use crate::policies::{Bounds, Cap, Policy};
 use crate::rng::Rng;
 
-/// Rolls two d6 dice
 #[inline]
 fn roll(rng: &mut Rng) -> u32 {
     let d1 = (rng.next_u64() % 6) as u32 + 1;
@@ -10,8 +9,7 @@ fn roll(rng: &mut Rng) -> u32 {
     d1 + d2
 }
 
-/// One pass-line decision with `odds_multiple` units of free odds behind the point.
-/// `wagered` is 1.0 on a come-out decision and `1.0 + odds_multiple` once a point is set.
+/// Free odds go up only once a point is set.
 pub fn pass_line(rng: &mut Rng, odds_multiple: f64) -> Outcome {
     match roll(rng) {
         7 | 11 => Outcome {
@@ -56,31 +54,25 @@ pub struct TrialConfig {
     pub rounds: u32,
     pub bankroll: f64,
     pub bounds: Bounds,
-    pub checkpoints: u32, // number of x-positions for the fan chart
+    pub checkpoints: u32, // fan-chart x-positions
     pub seed: u64,
-    pub rounds_per_hour: f64, // touches no draw; only sets `elapsed_hours` (baccarat's chapter)
+    pub rounds_per_hour: f64, // only sets `elapsed_hours`
 }
 
 pub struct TrialResult {
-    /// `trials * checkpoints`, row-major: trial-major, checkpoint-minor
-    pub paths: Vec<f64>,
+    pub paths: Vec<f64>, // trial-major, checkpoint-minor
     pub trials: u32,
     pub ruined: u32,
-    /// Sum of every bet placed, with double, split and free-odds money included.
-    pub total_wagered: f64,
-    /// Sum of the initial bet on each decision, before any double or split.
-    pub total_staked: f64,
+    pub total_wagered: f64, // every bet, doubles/splits/odds included
+    pub total_staked: f64,  // initial bets only
     pub total_net: f64,
     pub capped_by_table: u64,
     pub capped_by_bankroll: u64,
-    /// `rounds / rounds_per_hour`: the length of one trial, in hours.
-    pub elapsed_hours: f64,
+    pub elapsed_hours: f64, // per trial
 }
 
 pub enum Round {
-    /// One generator draw is one decision.
     Single(Generator),
-    /// Rolls dice until the pass line resolves, as one decision.
     CrapsPassLine { odds_multiple: f64 },
 }
 
@@ -94,9 +86,7 @@ impl Round {
     }
 }
 
-/// Runs `cfg.trials` trials of `cfg.rounds` decisions each, calling `make_trial`
-/// once per trial for a fresh round and policy. Panics if `rounds` or
-/// `checkpoints` is zero.
+/// Calls `make_trial` once per trial. Panics on zero `rounds` or `checkpoints`.
 pub fn run_trials<F>(cfg: &TrialConfig, mut make_trial: F) -> TrialResult
 where
     F: FnMut() -> (Round, Policy),
@@ -118,7 +108,6 @@ where
     };
 
     for trial in 0..cfg.trials {
-        // Every trial gets its own stream so they don't mix
         let mut rng = Rng::seed(cfg.seed ^ u64::from(trial).wrapping_mul(0x9E37_79B9_7F4A_7C15));
         let (mut round, mut policy) = make_trial();
 
@@ -127,7 +116,7 @@ where
         let mut next_c = 0usize;
 
         for r in 0..cfg.rounds {
-            // Ruin is a bankroll that can't cover the base bet: $5 at a $10 table.
+            // Ruin: the bankroll can't cover the base bet.
             if !ruined && bankroll < cfg.bounds.base {
                 ruined = true;
             }
@@ -154,8 +143,7 @@ where
                 }
             }
 
-            // Ruin is absorbing: a ruined path holds flat, so the bands carry no
-            // survivorship bias.
+            // A ruined path holds flat, so the bands carry no survivorship bias.
             while next_c < checkpoints
                 && (u64::from(r) + 1) * checkpoints as u64
                     >= (next_c as u64 + 1) * u64::from(cfg.rounds)
@@ -165,8 +153,7 @@ where
             }
         }
 
-        // The top-of-round check never sees the last round's bankroll, so a
-        // trial that busts on its final bet is counted here.
+        // Catches a bust on the final round, which the loop check never sees.
         if ruined || bankroll < cfg.bounds.base {
             out.ruined += 1;
         }

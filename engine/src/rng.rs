@@ -1,13 +1,11 @@
-// rng.rs
-
-/// xoshiro256** generator. `normal` caches Box-Muller's second variate in `spare`.
+/// xoshiro256**.
 pub struct Rng {
     s: [u64; 4],
     spare: Option<f64>, // Prince Harry
 }
 
 impl Rng {
-    /// Seeds the four state words from `z` through SplitMix64.
+    /// State words from SplitMix64.
     pub fn seed(mut z: u64) -> Self {
         let mut next = || {
             z = z.wrapping_add(0x9E3779B97F4A7C15);
@@ -22,7 +20,6 @@ impl Rng {
         }
     }
 
-    /// Next raw 64-bit output.
     #[inline]
     pub fn next_u64(&mut self) -> u64 {
         let r = self.s[1].wrapping_mul(5).rotate_left(7).wrapping_mul(9);
@@ -36,8 +33,7 @@ impl Rng {
         r
     }
 
-    /// Unbiased integer in `[0, n)`: Lemire's multiply, with a rejection loop
-    /// only when the window straddles a boundary. `n` must be nonzero.
+    /// Unbiased `[0, n)` by Lemire's method. `n` must be nonzero.
     #[inline]
     pub fn below(&mut self, n: u64) -> u64 {
         debug_assert!(n > 0);
@@ -60,7 +56,7 @@ impl Rng {
         (self.next_u64() >> 11) as f64 * (1.0 / (1u64 << 53) as f64)
     }
 
-    /// Standard normal by Box-Muller; every second call returns the cached spare.
+    /// Box-Muller; every second call returns the spare.
     pub fn normal(&mut self) -> f64 {
         if let Some(z) = self.spare.take() {
             return z;
@@ -73,8 +69,7 @@ impl Rng {
     }
 }
 
-/// Inverse standard normal CDF by Acklam's rational approximation, without the
-/// refinement step; absolute error at most 5.0e-9. Panics unless `0 < p < 1`.
+/// Inverse normal CDF (Acklam, unrefined; error <= 5e-9). Panics unless `0 < p < 1`.
 pub fn probit(p: f64) -> f64 {
     assert!(p > 0.0 && p < 1.0, "probit({p}) is outside (0, 1)");
 
