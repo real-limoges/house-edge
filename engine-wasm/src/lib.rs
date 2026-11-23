@@ -320,7 +320,7 @@ mod tests {
         assert!(engine_alloc(0).is_null());
         engine_free(std::ptr::null_mut(), 8);
 
-        let mut = engine_alloc(96);
+        let ptr = engine_alloc(96);
         assert!(!ptr.is_null());
         assert_eq!(ptr as usize % 8, 0);
         engine_free(ptr, 96);

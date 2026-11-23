@@ -1,7 +1,7 @@
 [workspace]
 # site/native/houseedge_nif joins the members once that crate builds; listing
 # it before then would fail the workspace resolve.
-members = ["engine", "engine-wasm"]
+members = ["engine", "engine-wasm", "site/native/houseedge_nif"]
 resolver = "2"
 
 # `release` must unwind: the NIF relies on catch_unwind, and an abort takes
