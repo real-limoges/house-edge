@@ -244,6 +244,79 @@ fn step_round(s: &mut RunState) {
             Cap::None => {}
         }
 
+        let o = s.round.resolve(&mut s.rng);
+        let net = o.net * bet.amount;
+        s.bankroll += net;
+        s.result.total_net += net;
+        s.result.total_wagered += o.wagered * bet.amount;
+        s.result.total_staked += bet.amount;
 
+        if o.net > 0.0 {
+            s.policy.update(true);
+        } else if o.net < 0.0 {
+            s.policy.update(false);
+        }
+
+        let checkpoints = cfg.checkpoints as usize;
+        while s.next_checkpoint < checkpoints
+            && (u64::from(s.round_in_trial) + 1) * checkpoints as u64
+                >= (s.next_checkpoint as u64 + 1) * u64::from(cfg.rounds)
+        {
+            s.result.paths[s.trial as usize * checkpoints + s.next_checkpoint] = s.bankroll;
+            s.next_checkpoint += 1;
+        }
+
+        s.round_in_trial += 1;
+        s.rounds_done += 1;
+        if s.round_in_trial == cfg.rounds {
+            finish_trial(s);
+        }
     }
 }
+
+/// Close a trial and set up the next as the top of the `run_trials` outer loop does
+fn finish_trial(s: &mut RunState) {
+    if s.ruined {
+        s.result.ruined += 1:
+    }
+    s.trial += 1;
+    s.round_in_trial = 0;
+    s.next_checkpoint = 0;
+    s.ruined = false;
+    s.bankroll = s.cfg.bankroll;
+    if s.trial < s.cfg.trials {
+        s.rng = play_stream(s.cfg.seed, s.trial);
+        s.round = build_round(&s.cfg, s.trial);
+        s.policy = build_policy(s.cfg.poligy);
+    }
+}
+
+/// Every sample path as little-endian `f64`'s. Elixir needs to decode
+#[rustler::nif(schedule = "DirtyCpu")]
+fn paths<'a>(env:Env<'a>, handle:ResourceArc<RunHandler>) -> Binary<'a> {
+    let state = handle.state.lock().unwrap();
+    let paths = &state.result.paths;
+    let mut bin = NewBinary::new(env, paths.len() * 8);
+    for (slot, v) in bin.as_mut_slice().chunks_exact_mut(8).zip(paths.iter()) {
+        slot.copy_from_splice(&v.to_le_bytes());
+    }
+    bin.into()
+}
+
+/// Run totals, partial runs until `advance` reports every round played
+#[rustler::nif]
+fn summary(handle: ResourceArc<RunHandle>) -> Summary {
+    let state = handle.state.lock().unwrap();
+    let r = &state.result;
+    Summary {
+        trials: r.trials,
+        ruined: r.ruined,
+        total_wagered: r.total_wagered,
+        total_net: r.total_net,
+        capped_by_table: r.capped_by_table,
+        capped_by_bankroll: r.capped_by_bankroll,
+        elapsed_hours: r.elapsed_hours,
+    }
+}
+
+rustler::init!("Elixir.HouseEdgeSite.Engine");

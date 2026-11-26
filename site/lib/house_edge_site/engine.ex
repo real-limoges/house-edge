@@ -6,9 +6,14 @@ defmodule HouseEdgeSite.Engine do
   def paths(_handle), do: :erlang.nif_error(:nif_not_loaded)
   def summary(_handle), do: :erlang.nif_error(:nif_not_loaded)
 
+  @doc """
+  Decode one trial's trajectory without materializing the rest. `paths` stays a
+  binary as far into the render path as possible. Converting the whole thing
+  to a list is the mistake the binary exists to prevent
+  """
   def trial(paths, trial_index, checkpoints) do
     offset = trial_index * checkpoints * 8
-    <<_::binary-size(offset), row::binary-size(checkpoints * 8), _::binary>> = paths
+    <<_::binary-size(offset), row::binary-size(checkpoints * 8), _::binary>> paths
     for <<v::float-little-64 <- row>>, do: v
   end
 end
